@@ -1,0 +1,264 @@
+---
+title: "Trabalho ME705"
+subtitle: VitóriaLinda da Silva Oliveira, RA212826; Brenda Luiza Correa, RA216037; Paula Liserre Calabrez, RA242782
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r message=FALSE, warning=FALSE}
+#install.packages("coda")
+library(tidyverse)
+library(coda)
+library(MASS)
+library(MCMCpack)
+library(ggplot2)
+```
+
+# Carregando base de dados
+```{r}
+dados <- read.csv("C:/Users/paula/Documents/UNICAMP/2024S1/ME705/Student_Performance.csv",
+                  sep = ",", stringsAsFactors = T)
+
+colnames(dados) <- c("horas_estudadas", "pontos_anteriores", "atividades_extras",
+                     "horas_de_sono", "num_questionarios", "desempenho")
+
+dados$atividades_extras <- ifelse(dados$atividades_extras == "Yes", 1, 0)
+
+dados$atividades_extras <- as.factor(dados$atividades_extras)
+
+dados$desempenho <- as.integer(dados$desempenho)
+```
+
+# Definindo vetores e matrizes
+```{r}
+n <- length(dados$desempenho)
+
+y <-  matrix(dados$desempenho, ncol = 1, nrow = n)
+
+x <- matrix(c(rep(1,n),dados$horas_estudadas, 
+              dados$pontos_anteriores, dados$atividades_extras, 
+              dados$horas_de_sono, dados$num_questionarios), 
+            ncol = 6 , nrow  = n)
+```
+\newpage
+# Plotando y
+```{r}
+# Calcular densidade de y
+densidade_y <- density(y)
+
+# Criar histograma de y
+hist(y, freq = FALSE, main = "Histograma de y com Densidade", 
+     xlab = "y", ylab = "Densidade", col = "pink2")
+
+# Adicionar densidade ao histograma
+lines(densidade_y, col = "#D9006E", lwd = 2)
+```
+\newpage
+# Definindo valores iniciais para as distribuições
+```{r}
+#Número de interações da cadeia
+M <- 10000
+
+#Para sigma
+a = 1
+b = 0.1
+
+#Para beta
+mu_b <- matrix(rep(0,6), nrow = 6, ncol = 1)
+sigma2 <- 100
+I <- diag(6)
+```
+
+
+```{r}
+#Colocando os betas dentro de uma matriz
+beta_cad1 <- matrix(0,nrow=M,ncol=6)
+beta_cad2 <- matrix(0,nrow=M,ncol=6)
+ 
+#Colocando tal dentro da martriz
+sigma_cad1 <- rep(0,M)
+sigma_cad2 <- rep(0,M)
+  
+#Atribuindo valores diferentes para as cadeias  
+beta_cad2[1,] <- 2
+sigma_cad2[1] <- 2
+
+beta_cad1 <- t(beta_cad1)
+beta_cad2 <- t(beta_cad2)
+invsig <- ginv(I*sigma2)
+```
+\newpage
+# Aplicando Gibbs  
+```{r}
+#Gibbs 
+for (i in 2:M) {
+  #Cadeia 1
+  #distribição de sigma
+  alpha.1 = a + n/2
+  beta.1 <- b + 0.5*(t(y - x%*%beta_cad1[,i-1])%*%(y - x%*%beta_cad1[, i-1]))
+  
+  sigma_cad1[i] = rinvgamma(1, alpha.1, beta.1)
+  
+  #distribuição  beta
+  mu2.1 <-  ginv((sigma_cad1[i])^-1*t(x)%*%x + invsig)%*%
+      ((sigma_cad1[i])^-1*t(x)%*%y + invsig%*%mu_b)
+  
+  precisao2.1 <- ginv((sigma_cad1[i])^-1*t(x)%*%x + invsig)
+  
+  beta_cad1[, i] <- mvrnorm(1, mu2.1, precisao2.1)  
+ 
+
+  #Cadeia 2
+  #distribição de sigma
+  alpha.2 = a + n/2
+  beta.2 <- b + 0.5*(t(y - x%*%beta_cad2[,i-1])%*%(y - x%*%beta_cad2[, i-1]))
+  
+  sigma_cad2[i] = rinvgamma(1, alpha.2, beta.2)
+  
+  #distribuição  beta
+  mu2.2 <-  ginv((sigma_cad2[i])^-1*t(x)%*%x + invsig)%*%
+      ((sigma_cad2[i])^-1*t(x)%*%y + invsig%*%mu_b)
+  
+  precisao2.2 <- ginv((sigma_cad2[i])^-1*t(x)%*%x + invsig)
+  
+  beta_cad2[, i] <- mvrnorm(1, mu2.2, precisao2.2)  
+}
+  
+mat <- matrix(c(t(beta_cad1), sigma_cad1, t(beta_cad2), sigma_cad2),ncol=14)
+
+colnames(mat) <- c("beta0_cad1", "beta1_cad1", "beta2_cad1", "beta3_cad1", 
+                   "beta4_cad1", "beta5_cad1", "sigma_cad1", "beta0_cad2", 
+                   "beta1_cad2", "beta2_cad2", "beta3_cad2", "beta4_cad2", 
+                   "beta5_cad2", "sigma_cad2" )
+
+#Aplicando burn-in de 5000
+mat_burnin <- mat[5001:10000,]
+```
+\newpage
+# Defasagem
+```{r}
+autocorr(mcmc(mat_burnin[,1]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,2]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,3]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,4]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,5]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,6]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,7]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,8]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,9]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,10]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,11]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,12]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,13]), lags = c(0, 1, 5, 10, 50))
+autocorr(mcmc(mat_burnin[,14]), lags = c(0, 1, 5, 10, 50))
+
+#A defasagem de 10 foi escolhida
+mat_burnin <-  mat[seq(from = M/2 +1, to = M, by = 10), ]
+```
+
+# Vendo a convergencia
+```{r}
+gelman.diag(list(mcmc(mat_burnin[,1]),mcmc(mat_burnin[,8])), confidence = 0.95)
+gelman.diag(list(mcmc(mat_burnin[,2]),mcmc(mat_burnin[,9])), confidence = 0.95)
+gelman.diag(list(mcmc(mat_burnin[,3]),mcmc(mat_burnin[,10])), confidence = 0.95)
+gelman.diag(list(mcmc(mat_burnin[,4]),mcmc(mat_burnin[,11])), confidence = 0.95)
+gelman.diag(list(mcmc(mat_burnin[,5]),mcmc(mat_burnin[,12])), confidence = 0.95)
+gelman.diag(list(mcmc(mat_burnin[,6]),mcmc(mat_burnin[,13])), confidence = 0.95)
+gelman.diag(list(mcmc(mat_burnin[,7]),mcmc(mat_burnin[,14])), confidence = 0.95)
+
+beta0 <- c(mat_burnin[,1], mat_burnin[,8])
+beta1 <- c(mat_burnin[,2], mat_burnin[,9])
+beta2 <- c(mat_burnin[,3], mat_burnin[,10])
+beta3 <- c(mat_burnin[,4], mat_burnin[,11])
+beta4 <- c(mat_burnin[,5], mat_burnin[,12])
+beta5 <- c(mat_burnin[,6], mat_burnin[,13])
+sigma_2 <- c(mat_burnin[,7], mat_burnin[,14])
+
+matriz_parametros <- cbind(beta0, beta1, beta2, beta3, beta4, beta5, sigma_2)
+```
+
+# Intervalo de credibilidade
+```{r}
+mcmc_samples <- mcmc(matriz_parametros)
+intervalos_credibilidade <- HPDinterval(mcmc_samples, prob = 0.95)
+intervalos_credibilidade
+```
+\newpage
+# Plotando os parametros
+```{r}
+par(mfrow = c(3, 2))
+plot(matriz_parametros[,1], type = "l", ylab = "Beta0", xlab = " ") #beta0
+plot(matriz_parametros[,2], type = "l",  ylab = "Beta1", xlab = " ")
+plot(matriz_parametros[,3], type = "l",  ylab = "Beta2", xlab = " ")
+plot(matriz_parametros[,4], type = "l",  ylab = "Beta3", xlab = " ")
+plot(matriz_parametros[,5], type = "l",  ylab = "Beta4", xlab = " ")
+plot(matriz_parametros[,6], type = "l",  ylab = "Beta5", xlab = " ")
+```
+\newpage
+```{r}
+plot(matriz_parametros[,7], type = "l",  ylab = "Sigma^2", xlab = " ")
+```
+
+# Estimando parametros
+```{r}
+#Calcule a média de cada coluna
+medias <- colMeans(matriz_parametros)
+
+#Arredondando as médias para 2 casas decimais
+medias_arredondadas <- round(medias, 2)
+medias_arredondadas <- as.vector(medias_arredondadas)
+```
+\newpage
+# Analisando o modelo
+```{r}
+#Valores estimados dos coeficientes beta e sigma_2
+betas <- medias_arredondadas[-7]
+
+# Resumo do modelo
+resumo <- data.frame(
+  Coeficientes = c("beta0", "beta1", "beta2", "beta3", "beta4", "beta5"),
+  Valores = betas)
+print(resumo)
+
+#previsões
+y_pred <- x %*% betas
+
+#resíduos
+residuos <- y - y_pred
+
+# Calcule o R^2
+SSE <- sum(residuos^2)
+SST <- sum((y - mean(y))^2)
+R2 <- 1 - SSE/SST
+cat("R^2:", R2, "\n")
+```
+\newpage
+```{r}
+# Visualização
+par(mfrow = c(2, 2))
+
+# Plot de valores observados vs previstos
+plot(y, y_pred, main = "Valores Observados vs Previstos",
+     xlab = "Valores Observados", ylab = "Valores Previstos")
+abline(0, 1, col = "#D9006E")
+
+# Plot dos resíduos
+plot(y_pred, residuos, main = "Residuos vs Valores Previstos",
+     xlab = "Valores Previstos", ylab = "Residuos")
+abline(h = 0, col = "#D9006E")
+
+# Histograma dos resíduos
+hist(residuos, main = "Histograma dos Residuos",
+     xlab = "Residuos", breaks = 30, col = "pink2")
+
+# QQ Plot dos resíduos
+qqnorm(residuos, main = "QQ Plot dos Residuos")
+qqline(residuos, col = "#D9006E")
+```
+
+
+
+
+
+
