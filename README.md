@@ -62,17 +62,4 @@ Atuar como **Analista de Dados Júnior**, aplicando conhecimentos em Estatístic
 
 ---
 
-## 📊 Projetos Acadêmicos
-
-- **Inferência Bayesiana**  
-  Ajuste de modelo de regressão linear múltipla utilizando o amostrador de Gibbs.
-
-- **Séries Temporais**  
-  Ajuste, análise residual e predição com modelos AR, MA, ARMA, ARIMA, SARMA e SARIMA.
-
-- **Consultoria Estatística**  
-  Análise exploratória de dados e ajuste de modelo de regressão logística binária.
-
----
-
 ⭐ Fique à vontade para explorar os projetos e entrar em contato!
