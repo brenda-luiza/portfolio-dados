@@ -1,0 +1,925 @@
+---
+title: "Atividade 03"
+output:
+  bookdown::html_document2:
+    number_sections: true
+    toc: true
+header-includes:
+   - \usepackage[brazil]{babel}
+bibliography: referencias.bib
+link-citations: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+options(scipen=9999)
+```
+
+
+```{r}
+# Impede o R de tentar compilar pacotes da fonte (útil em ambientes limitados)
+options(install.packages.compile.from.source = "never")
+
+# Lista de pacotes necessários
+pacotes <- c(
+  "tidyverse", "skimr", "scales", "ggplot2", "GGally",
+  "corrplot", "knitr", "gridExtra", "farver",
+  "kableExtra", "caret", "class", "rsample",
+  "tidymodels", "dplyr", "vcd", "tibble"
+)
+
+# Instala apenas os pacotes que ainda não estão instalados
+install.packages(
+  setdiff(pacotes, rownames(installed.packages())),
+  dependencies = TRUE
+)
+
+# Carrega todos os pacotes automaticamente
+invisible(lapply(pacotes, library, character.only = TRUE))
+
+```
+
+
+# Introdução {#sec-intro}
+
+<!-- sua introdução aqui -->
+
+<!-- O seu texto deve apresentar o assunto, motivar e explicar ao leitor o objetivo.-->
+
+<!-- O objetivo, a(s) pergunta(s) específica(s) que você quer responder devem estar claras na introdução, e, lá na conclusão, você deve retomar o argumento e mostrar como resolveu o problema. -->
+
+<!-- Finalize com um parágrafo explicando o que está por vir nas próximas seções do relatório (muito brevemente), desta forma, muitas vezes a introdução é a última parte que escrevemos, pois deve motivar e dar um resumo rápido do que está por vir -->
+
+<!-- Utilize cross-reference para mencionar as seções no texto, por exemplo: -->
+<!--  Na Seção \@ref(sec-banco), ... -->
+
+Este trabalho utiliza o conjunto de dados education, do UK Office for National Statistics, que contém informações socioeconômicas e educacionais de cidades inglesas, incluindo níveis de qualificação, presença de universidades, renda e densidade de emprego.
+
+O objetivo é desenvolver modelos preditivos para estimar o `education_score` de cada cidade, identificando também as variáveis mais influentes sobre o desempenho educacional. 
+
+As Seções \@ref(sec-banco) e \@ref(sec-treinoteste) descrevem o conjunto de dados, sua origem e o processo de preparação inicial, incluindo limpeza e divisão em conjuntos de treino e teste. A Seção \@ref(sec-exploratoria) apresenta a análise exploratória, destacando padrões e relações relevantes entre as variáveis preditoras e o desempenho educacional. Na Seção \@ref(sec-modelospropostos), diferentes algoritmos de regressão, Regressão Linear, Elastic Net, Boosting e Floresta Aleatória, são ajustados e comparados por meio de validação cruzada, permitindo avaliar a eficácia de cada abordagem.
+
+# Banco de dados {#sec-banco}
+
+```{r}
+load("education.rda")
+dados <- education
+```
+
+<!-- Modifique o texto abaixo como preferir, podendo incluir parte na introduçao etc... -->
+
+O conjunto de dados com `r dim(education)[1]` observações e `r dim(education)[2]` variáveis foi disponibilizado pelo *UK Office for National Statistics* e uma discussão sobre o mesmo pode ser encontrada no artigo  ["Why do children and young people in smaller towns do better academically than those in larger towns?"](https://www.ons.gov.uk/peoplepopulationandcommunity/educationandchildcare/articles/whydochildrenandyoungpeopleinsmallertownsdobetteracademicallythanthoseinlargertowns/2023-07-25). O *codebook* do conjunto de dados está disponível no [link](Codebook.html).
+
+Cada observação se refere às características sociais e educacionais de cidades inglesas, utilizadas nesse trabalho com o intuito de atingir o objetivo de predizer o nível de escolaridade dessas cidades.
+
+A Tabela abaixo resume a composição dos tipos de variáveis presentes no conjunto de dados.
+
+```{r}
+tabela_tipos <- dados %>%
+  summarise(across(everything(), ~class(.x)[1])) %>%
+  pivot_longer(everything(),
+               names_to = "Variável",
+               values_to = "Tipo")
+
+knitr::kable(tabela_tipos,
+             col.names = c("Variável", "Tipo de Variável"),
+             caption = "Tipos de Variáveis Presentes no Conjunto de Dados",
+             format = "html",
+             align = "c") %>%
+  kableExtra::kable_styling(font_size = 12, full_width = FALSE,
+                            position = "center",
+                            bootstrap_options = c("hover", "responsive", "condensed")) %>%
+  kableExtra::column_spec(1, width = "8cm") %>%
+  kableExtra::column_spec(2, width = "5cm")
+```
+
+
+## Divisão dos dados em Treino e Teste {#sec-treinoteste}
+
+
+<!-- Dados divididos em 80% treinamento, 20% teste. Cite quantas obs ficaram em cada conjunto de dados, use r inline. -->
+
+<!-- Caso utilize validaçao cruzada, mencione qual tipo -->
+
+<!-- Explique/justifique/motive o propósito dessa divisão treino/teste, validaçao cruzada. -->
+
+<!-- Mantenha exatamente a mesma divisao de dados para todos os modelos que irá avaliar -->
+
+
+```{r, include=FALSE}
+#remoção de colunas de identificação textual irrelevantes para modelagem, 
+#além das variáveis que formam o score educacional
+
+dados_modelo <- dados %>%
+  select(-town11cd, 
+         -town11nm, 
+         -ttwa11cd,
+         -ttwa11nm,
+         -key_stage_2_attainment_school_year_2007_to_2008                   ,
+         - key_stage_4_attainment_school_year_2012_to_2013,
+         -level_3_at_age_18, 
+         -highest_level_qualification_achieved_by_age_22_level_6_or_above,
+        - highest_level_qualification_achieved_by_age_22_less_than_level_1,
+         -highest_level_qualification_achieved_by_age_22_level_1_to_level_2,
+         -highest_level_qualification_achieved_by_age_22_level_3_to_level_5,
+         -level_2_at_age_18,
+         -highest_level_qualification_achieved_b_age_22_average_score )
+
+set.seed(123)  # garante reprodutibilidade
+n <- nrow(dados_modelo)
+indices_treino <- sample(1:n, size = 0.8*n)
+treino <- dados_modelo[indices_treino, ]
+teste <- dados_modelo[-indices_treino, ]
+
+
+
+## Validação cruzada 
+ctrl <- trainControl(method = "cv", number = 5)
+
+```
+
+Para a preparação dos dados, o primeiro passo consistiu em uma rigorosa seleção de variáveis. Inicialmente, foram removidas colunas de identificação textual (`town11cd`, `town11nm`, etc.), que não possuem valor preditivo.
+
+O passo mais crítico foi evitar o **vazamento de informações** (*data leakage*), que ocorre quando o modelo tem acesso a dados que não estariam disponíveis em um cenário real de previsão. A variável alvo, `education_score`, é um indicador composto, criado a partir de outras variáveis presentes no dataset. Conforme detalhado no artigo, as métricas  `key_stage_2_attainment_school_year_2007_to_2008`, `key_stage_4_attainment_school_year_2012_to_2013`, `level_3_at_age_18` e `highest_level_qualification_achieved_by_age_22_level_6_or_above` foram usadas diretamente em sua construção e, por isso, não usadas nos modelos.
+
+Seguindo essa mesma lógica, foram removidas também outras variáveis que, embora não sejam componentes diretos, medem a proporção da cidade que atingiu um determinado nível de qualificação até uma determinada idade, ou seja, o mesmo conceito em níveis mais baixos. Assim, as variáveis `level_2_at_age_18`, `highest_level_qualification_achieved_by_age_22_less_than_level_1`, `highest_level_qualification_achieved_by_age_22_level_1_to_level_2` e  `highest_level_qualification_achieved_by_age_22_level_3_to_level_5` foram removidas. Além disso, a variável `highest_level_qualification_achieved_b_age_22_average_score` também foi removida pois exibe a pontuação média mais alta de qualificação das cidades com base nos maiores níveis de qualificação educacional até 22 anos. 
+
+Manter essas variáveis tornaria o problema de predição fácil, pois estaria essencialmente usando uma versão da resposta para prever a própria resposta. O objetivo é prever o desempenho educacional a partir de fatores socioeconômicos e demográficos, e não a partir de outras métricas de desempenho educacional.
+
+Após essa filtragem, o conjunto de dados foi dividido em **80% para treinamento** e **20% para teste**, utilizando uma semente (`set.seed(123)`) para garantir a reprodutibilidade dos resultados. O conjunto de treinamento contém `r length(indices_treino)` observações, que serão usadas para construir os modelos, enquanto o conjunto de teste, com `r n - length(indices_treino)` observações, será mantido separado para a avaliação final. Essa separação é crucial para uma avaliação honesta da capacidade de generalização do modelo em dados novos.
+
+Além disso, foi utilizada validação cruzada do tipo k-fold, com 5 partições. Esse método divide o conjunto de treinamento em cinco partes: o modelo é ajustado cinco vezes, utilizando quatro partes para treino e uma para validação a cada iteração. Dessa forma, obtém-se uma estimativa mais estável do desempenho médio, reduzindo a variabilidade e o risco de overfitting.
+
+# Análise exploratória {#sec-exploratoria}
+
+<!-- Desconsidere os dados teste e apresente análise exploratória relevante dos dados treinamento para auxiliar nos passos iniciais da busca por um modelo.  -->
+
+<!-- * Apresente uma breve análise exploratória utilizando gráficos com o objetivo de  -->
+<!--    estudar a associação de das variáveis preditoras com a variável resposta (`education_score`).  -->
+
+<!-- Qualquer tabela /figura presente no relatório precisa ser introduzida e referenciada no texto. Explique ao leitor o propósito das mesmas. -->
+
+<!--    Considere tipos adequados de gráficos para cada tipo de variável e objetivos. -->
+<!--    * Podem fazer vários gráficos, para explorar, mas, no relatório, sejam suscintos, escolhendo apenas os principais. -->
+<!--    * Todos os gráficos escolhidos por você para serem incluídos no relatório devem conter legendas explicativas  -->
+<!--    (*captions*) claras e informativas, indicando o que está sendo analisado  -->
+<!--    e destacando os principais padrões/conclusões observados.  -->
+<!--    Caso não tenha nada relevante a ser comentado, não inclua no relatório. -->
+<!--    * Apresente sua análise e comente os resultados, reforçando que o objetivo  -->
+<!--    principal é estudar a associaçao de cada variável com a variável resposta.  -->
+<!--    * Com base na análise exploratória, aplique filtros e/ou reagrupe/filtre níveis de variáveis categóricas com pouquíssimas observações, etc...   -->
+
+<!-- Caso decida utilizar transformação de alguma variável, criar outra variável, padronizar, etc... Aqui é o momento de mencionar/motivar essas decisões. Se for este o caso, acrescente um parágrafo explicando as transformações que serão feitas (preprocessamento)-->
+
+<!-- Alguma variável será descartada logo de início? Justifique, se for o caso-->
+
+<!-- Algumas obs serão descartadas logo de início? Justifique, se for o caso-->
+
+<!-- Deixe claro qual o que será excluído, o que será criado/transformado.-->
+
+<!-- Apresente as estatísticas e gráficos que ajudam a atingir o objetivo definido na introdução-->
+
+<!-- Gráficos exploratórios/univariados que você fez apenas para "limpar" os dados não precisam, necessariamente, aparecer no texto do relatório, apenas inclua gráficos que auxiliem no objetivo principal. -->
+
+```{r, include=FALSE}
+# Sumarização geral
+glimpse(treino)
+```
+
+A princípio, foi analisada a distribuição da variável resposta `education_score`, que representa o desempenho educacional médio nas localidades do Reino Unido. A Figura \@ref(fig:hist-resp) mostrou uma distribuição aproximadamente simétrica, com concentração em zero, o valor padronizado como a média nacional.
+
+```{r hist-resp, fig.cap= "Histograma da distribuição de Education Score", fig.height=3,fig.width=5, fig.align = 'center'}
+
+#Distribuição da variável resposta
+ggplot(treino, aes(x = education_score)) +
+  geom_histogram(fill = "darkgreen", color = "black", bins = 25, alpha = 0.8) +
+  geom_vline(aes(xintercept = mean(education_score, na.rm = TRUE)), color = "red", linetype = "dashed") +
+  labs(title = "Histograma da distribuição de Education Score",
+       x = "Education Score",
+       y = "Frequencia") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14),
+    plot.subtitle = element_text(hjust = 0.5),
+    plot.caption = element_text(hjust = 0, face = "italic")
+  )
+
+
+```
+
+
+
+```{r}
+# Correlação específica com o education score - desconsiderando NA
+
+# Seleciona apenas variáveis numéricas do treino 
+num_vars <- treino %>% select(where(is.numeric))
+
+cor_target <- num_vars %>%
+  summarise(across(everything(), ~cor(.x, treino$education_score, use="pairwise.complete.obs"))) %>%
+  pivot_longer(everything(), names_to = "variavel", values_to = "correlacao") %>%
+  arrange(desc(abs(correlacao)))
+
+```
+
+```{r corr-resp}
+
+knitr::kable(cor_target,
+             col.names = c("Variável", "Correlação com Education Score"),
+             caption = "Correlações das Variáveis Numéricas com a Variável Resposta",
+             format = "html",
+             align = "c") %>%
+  kableExtra::kable_styling(font_size = 12, full_width = FALSE,
+                            position = "center",
+                            bootstrap_options = c("hover", "responsive", "condensed")) %>%
+  kableExtra::column_spec(1, width = "8cm") %>%
+  kableExtra::column_spec(2, width = "5cm")
+
+```
+
+
+
+
+A Tabela \@ref(tab:corr-resp) revela a associação linear entre as variáveis numéricas e o `education_score`. A correlação positiva mais forte (**0.878**) é com `activity_at_age_19_full_time_higher_education`, indicando que uma maior proporção de jovens no ensino superior está fortemente associada a um melhor desempenho educacional na localidade.
+
+Por outro lado, a correlação negativa mais expressiva (**-0.569**) ocorre com a variável `activity_at_age_19_out_of_work`, sugerindo que o desemprego ou a inatividade entre os jovens de 19 anos é um forte indicador de um menor `education_score`. Outras atividades, como a entrada precoce no mercado de trabalho (`activity_at_age_19_employment_with_earnings_above_10_000`), também apresentam correlações negativas moderadas.
+
+Finalmente, variáveis como `population_2011` e `ks4_2012_2013_counts` mostram correlações próximas de zero, sugerindo ausência de uma relação linear significativa com a variável resposta.
+
+```{r }
+# Analisando multicolinearicade
+
+# Remove a variável resposta
+num_vars_pred <- num_vars %>% select(-education_score)
+
+# Calcula matriz de correlação
+corr_matrix <- cor(num_vars_pred, use = "pairwise.complete.obs")
+
+# Transforma em tabela longa
+corr_tabela <- as.data.frame(as.table(corr_matrix)) %>%
+  rename(Var1 = Var1, Var2 = Var2, Correlacao = Freq) %>%
+  mutate(Correlacao = round(Correlacao, 3)) %>%
+  arrange(desc(abs(Correlacao))) %>%
+  filter(Var1 != Var2)
+
+# Filtra apenas correlações fortes |r| > 0.7
+corr_forte <- corr_tabela %>%
+  filter(abs(Correlacao) > 0.7) %>%
+  arrange(desc(abs(Correlacao)))
+
+```
+
+
+
+```{r corr-forte}
+corr_forte %>%
+  slice(seq(2, n(), by = 2)) %>% 
+  knitr::kable(
+    caption = "Correlacoes fortes entre variaveis preditoras (|r| > 0.7)",
+    align = "c",
+    col.names = c("Variavel 1", "Variavel 2", "Correlacao"), 
+    format = "html") %>%
+  kableExtra::kable_styling(font_size = 12,
+                            full_width = FALSE,
+                            position = "center",
+                            bootstrap_options = c("hover", "responsive", "condensed")
+                            ) %>%
+  kableExtra::column_spec(1, width = "6cm") %>%
+  kableExtra::column_spec(2, width = "6cm") %>%
+  kableExtra::column_spec(3, width = "4cm")
+```
+
+
+```{r}
+# Removendo variáveis altamente correlacionadas
+
+treino <- treino %>% select(-ks4_2012_2013_counts,
+                            -activity_at_age_19_appprenticeships,
+                            -activity_at_age_19_employment_with_earnings_above_0)
+
+teste = teste %>% select(-ks4_2012_2013_counts,
+         -activity_at_age_19_appprenticeships,
+         -activity_at_age_19_employment_with_earnings_above_0)
+```
+
+
+Após analisar a relação dos preditores com a variável resposta, investigou-se a multicolinearidade entre os próprios preditores.  
+
+A Tabela \@ref(tab:corr-forte) mostra os pares de variáveis com correlação de Pearson superior a 0,7. Para reduzir esse efeito, foi removida uma variável de cada par, considerando dois critérios: relevância conceitual e correlação individual com o `education_score`.  
+
+Por exemplo, `ks4_2012_2013_counts` foi descartada em favor de `population_2011`, por ser conceitualmente redundante. Variáveis como `activity_at_age_19_appprenticeships` e `activity_at_age_19_employment_with_earnings_above_0` também foram removidas por apresentarem correlação mais baixa com a variável resposta.  
+
+Desse modo, a exclusão dessas variáveis buscou manter no conjunto de dados apenas aquelas que fornecem informações distintas e relevantes para a modelagem, reduzindo o risco de multicolinearidade e aumentando a robustez do modelo final.
+
+
+```{r}
+# Função auxiliar para padronizar os boxplots
+
+plot_box <- function(data, var, title, xlab) {
+  data %>%
+    drop_na({{ var }}, education_score) %>%
+    ggplot(aes(x = {{ var }}, y = education_score, fill = {{ var }})) +
+    geom_boxplot(alpha = 0.8, outlier.size = 1) +
+    labs(title = title, x = xlab, y = "Education Score") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5, size = 10),
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
+  }
+
+```
+
+A Figura \@ref(fig:educarionTamCidade) exibe boxplots de `education_score` pelo tamanho das cidades. A partir dessa figura foi possível observar que o tamanho das cidades tem grande influência principalmente na disperção dos dados, com grandes cidades apresentando baixa disperção (apesar de scores majoritariamente negativos) e pequenos municípios apresentando grande disperção. Assim, quanto menor a cidade, maior é a disperção de `education_score`.
+
+```{r educarionTamCidade,fig.cap="Education Score por Tamanho da Cidade", fig.height=3,fig.width=5, fig.align = 'center'}
+# 1. Tamanho da Cidade
+
+plot_box(treino, size_flag, "Education Score por Tamanho da Cidade", "Tamanho da Cidade")
+
+```
+
+A Figura \@ref(fig:educarionRegiao) apresenta o education score por região que, apesar de não aparentarem possuir grandes diferenças entre si, quando incluídas nos modelos são significativas.
+
+```{r educarionRegiao,fig.cap="Education Score por Região", fig.height=3,fig.width=5, fig.align = 'center'}
+# 2. Região
+
+plot_box(treino, rgn11nm, "Education Score por Região", "Região")
+
+```
+
+A partir da Figura \@ref(fig:educarionArea), é possível concluir que áreas costeiras têm, em média, Ecucation Scores mais baixos se comparadas com áreas não costeiras. 
+
+```{r educarionArea,fig.cap="Education Score por Área Costeira", fig.height=3,fig.width=5, fig.align = 'center'}
+# 3. Área Costeira
+
+plot_box(treino, coastal, "Education Score por Área Costeira", "Área Costeira")
+
+```
+
+Ao observar áreas costeiras mais detalhadamente, não é possível concluir que há grandes diferenças entre os tipos de áreas costeiras, como demosntrado na Figura \@ref(fig:educarionAreaDet).
+
+```{r educarionAreaDet,fig.cap="Education Score por Tipo Detalhado de Área Costeira", fig.height=3,fig.width=5, fig.align = 'center'}
+# 4. Área Costeira Detalhada
+
+plot_box(treino, coastal_detailed, 
+         "Education Score por Tipo Detalhado de Área Costeira", "Área Costeira Detalhada")
+
+```
+
+Além das áreas costeiras detalhadas, a classificação TTWA e densidade de emprego nas cidades também não parecem afetar o score final obtido pelos alunos, como observado nas figuras \@ref(fig:educarionTTWA) e \@ref(fig:educarionEmprego).
+
+```{r educarionTTWA,fig.cap="Education Score por Classificação TTWA", fig.height=3,fig.width=5, fig.align = 'center'}
+# 5. Classificação TTWA
+
+plot_box(treino, ttwa_classification, "Education Score por Classificação TTWA", "Classificação TTWA")
+
+```
+
+```{r educarionEmprego,fig.cap="Education Score por Densidade de Emprego", fig.height=3,fig.width=5, fig.align = 'center'}
+# 6. Densidade de Emprego
+
+plot_box(treino, job_density_flag, "Education Score por Densidade de Emprego", "Densidade de Emprego")
+
+```
+
+A faixa de renda, entretanto, é claramente um fator que corrobora para o bom desempenho dos alunos. Na Figura \@ref(fig:educarionRenda), ao deixarmos de olhar para $cities$ e observarmos apenas $towns$, é evidente que quanto maior a deprivação salarial dos municípios, menor é seu Education Score. $Cities$ por sua vez, tem comportamento semelhante à cidades com maior deprivação salarial.
+
+```{r educarionRenda,fig.cap="Education Score por Faixa de Renda", fig.height=3,fig.width=5, fig.align = 'center'}
+# 7. Faixa de Renda
+
+plot_box(treino, income_flag, "Education Score por Faixa de Renda", "Faixa de Renda")
+
+```
+
+A partir da Figura \@ref(fig:educarionUni) é possível observar que a presença de universidade na cidade/município não afeta o Education Score de forma muito evidente. A dispersão dos scores obtidos é nitidamente menor mas vale ressaltar que no conjunto de dados selecionado para o treino dos modelos, apenas 52 das 883 cidades constam com a presença de universidades.
+
+```{r educarionUni,fig.cap="Education Score por Presença de Universidade", fig.height=3,fig.width=5, fig.align = 'center'}
+# 8. Presença de Universidade
+
+plot_box(treino, university_flag, "Education Score por Presença de Universidade", "Presença de Universidade")
+
+```
+
+Em questão influência do nível de qualificação dos residentes de 35 a 64 anos no score dos alunos, a Figura \@ref(fig:educarionQualificacao) deixa evidente que quanto mais qualificados os residentes de uma cidade/município são, melhor é o seu desempenho educacional.
+
+```{r educarionQualificacao,fig.cap="Education Score por Nível de Qualificação dos Residentes (35–64 anos)", fig.height=3,fig.width=5, fig.align = 'center'}
+# 9. Nível de Qualificação (35-64 anos)
+
+plot_box(treino, level4qual_residents35_64_2011,
+"Education Score por Nível de Qualificação dos Residentes (35–64 anos)",
+"Nível de Qualificação")
+
+```
+
+
+```{r}
+categoricas <- treino %>% select(size_flag, rgn11nm, coastal, coastal_detailed, 
+                                 ttwa_classification, job_density_flag, income_flag,
+                                 university_flag, level4qual_residents35_64_2011)
+
+# Função para calcular V de Cramer entre duas variáveis
+cramer_v_calc <- function(x, y) {
+  tab <- table(x, y)
+  assocstats(tab)$cramer
+}
+
+# Criar matriz de V de Cramer
+matriz_cramer <- matrix(NA, nrow = ncol(categoricas), ncol = ncol(categoricas),
+                        dimnames = list(names(categoricas), names(categoricas)))
+
+for(i in 1:ncol(categoricas)){
+  for(j in i:ncol(categoricas)){
+    v <- cramer_v_calc(categoricas[[i]], categoricas[[j]])
+    matriz_cramer[i,j] <- v
+    matriz_cramer[j,i] <- v
+  }
+}
+
+```
+
+
+```{r matrizCramer}
+knitr::kable(matriz_cramer,
+             caption = "Matriz de Cramer para as variáveis categóricas",
+             format = "html",
+             align = "c"
+) %>%
+  kable_styling(font_size = 12, full_width = FALSE, 
+                position = "center", 
+                bootstrap_options = c("hover", "responsive")) %>%
+  column_spec(4, width = "6cm")
+```
+
+
+
+```{r}
+treino <- treino %>% select(-coastal_detailed)
+
+teste = teste %>% select(-coastal_detailed)
+```
+
+Para analisar a associação entre as variáveis preditoras categóricas, foi utilizada a estatística V de Cramer, cujos resultados estão na Tabela \@ref(tab:matrizCramer). O V de Cramer mede a força da associação entre duas variáveis nominais, variando de 0 (sem associação) a 1 (associação perfeita). A análise revelou uma associação quase perfeita de **0.983** entre `coastal` e `coastal_detailed`, indicando alta redundância, que a segunda é apenas uma versão mais detalhada da primeira. Para evitar multicolinearidade, a variável `coastal_detailed` foi removida, preservando a informação essencial através da variável binária `coastal`.
+
+```{r}
+# Contagem de valores ausentes por variável
+na_summary <- colSums(is.na(treino)) %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "Variável") %>%
+  rename(`Valores Ausentes` = ".")
+
+# Tabela formatada
+knitr::kable(na_summary,
+             caption = "Contagem de valores ausentes no conjunto de treino",
+             format = "html",
+             align = "c" 
+) %>%
+  kable_styling(font_size = 12, full_width = FALSE, 
+                position = "center", 
+                bootstrap_options = c("hover", "responsive")) %>%
+  column_spec(1, width = "10cm") %>% 
+  column_spec(2, width = "4cm") 
+
+```
+
+
+A etapa final do pré-processamento lidou com os dados ausentes. Foi observado que a coluna `activity_at_age_19_out_of_work` continha um volume massivo de valores faltantes (377 no conjunto de treino). Tentar preencher uma lacuna de informação tão grande poderia distorcer os padrões reais dos dados e levar a um modelo enviesado. Para garantir a integridade da análise e a robustez dos resultados, optou-se pela remoção completa desta variável.
+
+```{r}
+# Utilizando apenas os dados de treinamento
+
+treino <- treino %>% select(-activity_at_age_19_out_of_work) %>% drop_na() %>%
+  mutate(across(where(is.character), as.factor))
+teste <- teste %>%  select(-activity_at_age_19_out_of_work) %>% drop_na() %>%
+  mutate(across(where(is.character), as.factor))
+
+```
+
+
+A estrutura final dos dados que serão utilizados para treinar os algoritmos é apresentada a seguir.
+
+```{r}
+tabela_treino <- treino %>%
+  summarise(across(everything(), ~class(.x)[1])) %>%
+  pivot_longer(everything(),
+               names_to = "Variável",
+               values_to = "Tipo")
+
+knitr::kable(tabela_treino,
+             col.names = c("Variável", "Tipo de Variável"),
+             caption = "Estrutura Final dos Dados",
+             format = "html",
+             align = "c") %>%
+  kableExtra::kable_styling(font_size = 12, full_width = FALSE,
+                            position = "center",
+                            bootstrap_options = c("hover", "responsive", "condensed")) %>%
+  kableExtra::column_spec(1, width = "8cm") %>%
+  kableExtra::column_spec(2, width = "5cm")
+```
+
+# Modelos propostos {#sec-modelospropostos}
+
+<!-- Utilize somente os dados de treinamento, considerando a matriz X após transformações mencionadas na análise descritiva, se for o caso.-->
+
+<!-- Cite cada modelo proposto e como você chegou no modelo ajustado. Modelo aqui me refiro a um workflow (combinação de preprocessamento+modelo) -->
+
+<!-- Voce pode criar subseções ou apresentar mais sucintamente -->
+
+<!-- Obrigatoriamente, ao final, apresente uma tabela em que cada linha é um workflow com sua(s) métrica(s) de desempenho no treino/validaçao cruzada  -->
+
+<!-- Finalize mencionando qual workflow você escolheu para treinar o modelo final -->
+
+<!-- Sua escolha pode se basear em outros critérios além de melhor desempenho segundo uma métrica. Se o objetivo for interpretaçao, de repente escolher um modelo com desempenho similar que permite isso, etc.... -->
+
+Os modelos propostos nesse trabalho para predizer o nível de escolaridade das cidades inglesas são: Regressão Linear Múltipla, Regressão Linear Regularizada com Elastic Net (união dos métodos de regularização Ridge e Lasso), Florestas Aleatórias e Boosting. Esses algoritmos se baseiam em técnicas de aprendizado de máquina supervisionado para problemas de regressão, ou seja, que fazem predição de valores numéricos contínuos.
+
+
+## Regressão Linear Múltipla (LM)
+
+A função de predição da Regressão Linear considera que a variável resposta possa ser explicada como uma combinação linear das variáveis explicativas ponderadas por um conjunto de parâmetros $\boldsymbol{\beta} = (\beta_0, \ldots, \beta_d)$, e pode ser representada pela seguinte forma apresentada por [@izbicki2020]:
+
+$$
+g(\mathbf{x}) \;=\; \boldsymbol{\beta}^\top \mathbf{x}
+\;=\; \sum_{i=0}^{d} \beta_i\,x_i
+$$
+
+Os parâmetros são estimados pelo método dos mínimos quadrados, que minimiza a distância entre os pontos e o hiperplano formado pela combinação linear. Ademais, o pré processamento desse algoritmo de predição contou com a centralização e padronização das variáveis, para que apresentassem média zero e desvio padrão igual a um.   
+
+```{r}
+# Definindo a semente para garantir reprodutibilidade
+set.seed(123)
+
+# Modelo 1: Regressão Linear (LM)
+modelo_lm <- train(
+  education_score ~ .,
+  data = treino,
+  method = "lm",
+  trControl = ctrl,
+  preProcess = c("center", "scale"),
+  na.action = na.pass
+)
+
+
+```
+
+## Regressão Linear Regularizada com Elastic Net (GLMnet)
+
+A Regressão linear regularizada com Elastic Net foi proposta em 2005 por [@zou2005] como um novo método de regularização e seleção de variáveis. O método Elastic Net foi desenvolvido para superar as limitações de duas técnicas de regularização: Regressão Ridge (penalidade $L_2$) e Lasso (penalidade $L_1$).
+
+Embora a Regressão Ridge melhore a predição por meio de um `encolhimento (shrinkage)` contínuo dos coeficientes, não é capaz de produzir um modelo parcimonioso, pois sempre mantém todos os preditores. Já em relação a Regressão Lasso, ela realiza o encolhimento e a seleção de variáveis simultaneamente, porém apresenta limitações na existência de variáveis altamente correlacionadas, por só selecionar uma delas, e também quando o número de preditores ($p$) é muito maior do que o número de observações ($n$), pois só seleciona no máximo $n$ variáveis.
+
+O Elastic Net combina as penalidades do Lasso ($L_1$) e do Ridge ($L_2$), buscando encontrar os coeficientes $(\beta_0, \beta)$ que minimizam a seguinte expressão utilizada no pacote `glmnet`(Friedman, Hastie, & Tibshirani, 2010):
+  
+$$
+  \min_{(\beta_{0},\beta)} \left[ \frac{1}{2N}\sum_{i=1}^{N}(y_{i}-\beta_{0}-x_{i}^{\top}\beta)^{2}+\lambda P_{\alpha}(\beta) \right]
+$$
+  
+Onde $P_{\alpha}(\beta)$ é a penalidade Elastic Net:
+  
+$$
+  P_{\alpha}(\beta) = (1-\alpha)\frac{1}{2}||\beta||_{l_{2}}^{2}+\alpha||\beta||_{l_{1}}
+$$
+E os componentes da norma são:
+  
+- $||\beta||_{l_{1}} = \sum_{j=1}^{p}|\beta_{j}|$ (A penalidade $L_1$ do Lasso)
+
+- $||\beta||_{l_{2}}^{2} = \sum_{j=1}^{p}\beta_{j}^{2}$ (A penalidade $L_2$ do Ridge)
+
+O hiperparâmetro $\alpha$ controla a mistura entre os dois. Se $\alpha=1$, o modelo é o Lasso puro, mas se $\alpha=0$, o modelo é a Ridge pura. Para $0 < \alpha < 1$, o modelo é uma mistura que remove as instabilidades do Lasso, mas mantém sua capacidade de seleção de variáveis.
+
+Dessa forma, o Elastic Net realiza a seleção automática de variáveis, consegue incluir ou excluir grupos de preditores fortemente correlacionados, não seleciona apenas $n$ variáveis.
+
+
+```{r}
+set.seed(123)
+#GLMnet (Ridge/Lasso)
+modelo_glmnet <- train(
+  education_score ~ .,
+  data = treino,
+  method = "glmnet",
+  trControl = ctrl,
+  preProcess = c("center", "scale"),
+  na.action = na.pass
+)
+
+#interpretação dos coeficientes do modelo
+
+coeficientes <- coef(modelo_glmnet$finalModel, modelo_glmnet$bestTune$lambda)
+
+tabela_coef <- data.frame(
+  Variavel = rownames(coeficientes),
+  Coeficiente = as.numeric(coeficientes[, 1])
+)
+
+tabela_coef <- tabela_coef %>%
+  arrange(desc(abs(Coeficiente))) %>%
+  mutate(Coeficiente = round(Coeficiente, 4))
+```
+
+Neste trabalho, o processo de validação cruzada selecionou os melhores valores de $\alpha$ e $\lambda$, sendo: `r modelo_glmnet$bestTune[1]` (modelo Elastic Net) e `r modelo_glmnet$bestTune[2]`, respectivamente. As variáveis preditoras também foram centralizadas e padronizadas. 
+
+## Florestas aleatórias (RF)
+
+Florestas aleatórias (Random Forests) são um método que melhora a técnica de Bagging, que é um procedimento baseado em reduzir a alta variância das árvores de decisão. Essa técnica cria amostras bootstrap (com resposição) do conjunto de treino, ajusta árvores de decisão profundas para cada amostra, e utiliza a média das predições para fazer uma predição final. Porém, se houver um forte preditor no conjunto de dados, a maioria das árvores irá utilizar essa variável na primeira divisão, fazendo com que se tornem parecidas e, consequentemente, alto correlacionadas [@james2013].
+
+Assim, na construção de árvores na Floresta aleatória, a cada divisão (nó), o algortimo seleciona aleatoriamente um conjunto de $m$ preditores do conjunto total de $p$ preditores. Se $m=p$, a Floresta aleatória é igual ao Bagging. Este método torna as árvores menos correlacionadas, o que resulta em uma redução maior da variância, tornando a média das previsões mais confiável.
+
+Neste trabalho, o número de árvores utilizadas foi igual a $500$ e, pela validação cruzada, o subconjunto que gerou o menor erro médio foi de $m=14$ (considerando que $p \geq 26$, juntando variáveis numéricas e dummies automaticamente criadas).
+
+
+```{r include=FALSE}
+set.seed(123)
+# Modelo 3: Random Forest (RF)
+modelo_rf <- train(
+  education_score ~ .,
+  data = treino,
+  method = "rf",
+  trControl = ctrl,
+  importance = TRUE
+)
+
+print(modelo_rf$finalModel$ntree)
+print(modelo_rf$bestTune)
+
+
+```
+
+
+## Boosting
+
+O método Boosting também é uma técnica de `ensemble`, que combina estimadores fracos, como árvores de decisão. Entretanto, ao invés de criar as árvores de forma independente, como no Bagging, elas são combinadas de forma sequencial e adaptativa. O procedimento é iterativo, assim cada nova árvore é construída utilizando informações das árvores já ajustadas, com o objetivo de corrigir os erros cometidos pelos modelos anteriores.
+
+Como exposto por [@james2013], o modelo inicial ($\hat{f}(x)$) começa nulo, e os resíduos ($r_i$) são iguais aos valores da variável resposta ($y_i$). Em cada iteração, é ajustada uma árvore utilizando os resíduos atuais como a variável dependente. O modelo atual é atualizado com uma versão `encolhida (shrunken)` da nova ávore, controlada pela taxa de aprendizado ($\lambda$):
+
+$$
+\hat{f}(x) \leftarrow \hat{f}(x) + \lambda \hat{f}^b(x)
+$$
+Após isso, os resíduos são atualizados para a próxima iteração, refletindo os erros que o novo modelo ainda comete:
+
+$$
+r_i \leftarrow r_i - \lambda \hat{f}^b(x_i)
+$$
+O modelo final é a soma ponderada pela taxa de aprendizado de todas as árvores construídas sequencialmente:
+
+$$
+\hat{f}(x) = \sum_{b=1}^{B} \lambda \hat{f}^b(x)
+$$
+Como nesse modelo um alto número de árvores pode levar ao sobreajuste, o melhor modelo escolhido pela validação cruzada utilizou 1500 iterações. Além disso, foram definidos os parâmetros $p=2$ de profundidade das árvores e $\lambda=0.01$, conforme sugerido por Izbicki e Santos.
+
+```{r}
+set.seed(123)
+#Boosting
+
+#grid de hiperparâmetros para testar.
+
+gbm_grid <- expand.grid(
+  n.trees = c(100,500, 1000, 1500, 2000),             # Número de árvores (iterações)
+  interaction.depth = c(2, 4),      # Profundidade das árvores
+  shrinkage = 0.01,                  # Taxa de aprendizado (learning rate)
+  n.minobsinnode = 10               # Mínimo de observações em um nó final da árvore
+)
+
+modelo_boost <- train(
+  education_score ~ ., 
+  data = treino,
+  method = "gbm",                   
+  trControl = ctrl,
+  preProcess = c("center", "scale"),
+  tuneGrid = gbm_grid,
+  verbose = FALSE                   
+)
+
+```
+
+
+## Comparação entre os modelos
+
+```{r}
+set.seed(123)
+# Coletar os resultados da validação cruzada
+resultados <- resamples(list(
+  LM = modelo_lm,
+  BOOSTING = modelo_boost,
+  GLMnet = modelo_glmnet,
+  RF = modelo_rf
+))
+
+```
+
+```{r }
+
+metricas <- summary(resultados)$statistics
+
+tabela_resumo <- as.data.frame(metricas$RMSE) %>%
+  rownames_to_column("Model") %>% 
+  rename(Modelo = Model, RMSE_CV = Mean) %>%
+  select(Modelo, RMSE_CV) %>%
+  left_join(
+    as.data.frame(metricas$Rsquared) %>%
+      rownames_to_column("Model") %>% 
+      rename(Modelo = Model, Rsquared_CV = Mean) %>%
+      select(Modelo, Rsquared_CV),
+    by = "Modelo"
+  ) %>% 
+  left_join(
+    as.data.frame(metricas$MAE) %>%
+      rownames_to_column("Model") %>% 
+      rename(Modelo = Model, MAE_CV = Mean) %>%
+      select(Modelo, MAE_CV),
+    by = "Modelo"
+  ) %>%
+  arrange(desc(Rsquared_CV))
+
+```
+
+```{r resumo-models}
+
+knitr::kable(tabela_resumo,
+             caption = "Resumo das métricas de desempenho dos modelos propostos",
+             format = "html",
+             align = "c") %>%
+  kable_styling(
+    font_size = 12,
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("hover", "responsive")) %>%
+  column_spec(1, width = "6cm") %>% 
+  column_spec(2, width = "4cm") %>% 
+  column_spec(3, width = "4cm") %>% 
+  column_spec(4, width = "4cm")             
+
+
+```
+
+Com base nos resultados expostos na Tabela \@ref(tab:resumo-models), o modelo de Regressão Linear Regularizada com Elastic Net demonstrou o melhor desempenho preditivo em todas as métricas utilizadas.Os menores valores da Raiz do Erro Quadrático Médio (RMSE) e do Erro Médio Absoluto (MAE) mostraram que entre os modelos propostos, o `GLMnet` apresenta, em média, os valores preditos mais próximos dos valores reais, utilizando os dados da validação cruzada.
+
+Além disso, o maior valor do $R^2$ também indica que as variáveis do modelo foram capazes de explicar a maior proporção da variabilidade da variável resposta `education_score`, aproximadamente `r tabela_resumo[1,3]`%.
+
+```{r comp-RMSE, fig.cap="Comparação do RMSE entre os modelos propostos (Validação Cruzada)", fig.height=3,fig.width=7, fig.align = 'center'}
+
+# Plot da comparação dos modelos
+
+bwplot(resultados, metric = "RMSE")
+
+```
+A Figura \@ref(fig:comp-RMSE) mostra que os modelos considerados mais simples e interpretáveis (`GLMnet` e `LM`) apresentam as menores medianas e valores mínimos, com uma maior concentração dos dados à esquerda, indicando menores valores de RMSE. Ademais, também foi possível notar nesses modelos uma variabilidade dos dados um pouco maior em relação aos outros, como o `Boosting`, que apresenta resultados mais estáveis.
+
+```{r comp-Rsquared, fig.cap="Comparação do R-squared entre os modelos propostos (Validação Cruzada)", fig.height=3,fig.width=7, fig.align = 'center'}
+
+bwplot(resultados, metric = "Rsquared")
+```
+É possível notar um desempenho semelhante na Figura \@ref(fig:comp-Rsquared), com os modelos `GLMnet` e `LM` apresentando as maiores medianas e valores máximos do $R^2$, indicando maiores proporções da variável resposta explicadas por esses modelos, apesar de uma variabilidade maior nos resultados.
+
+# Modelo Final
+
+<!-- O workflow final deverá ser treinado utilizando o dado de treinamento. Calcule a métrica de desempenho modelo final nos dados de treino.  -->
+
+<!-- Apresente o modelo final brevemente. Caso tenha como interpretar, interprete alguns parâmetros relevantes -->
+
+<!-- Calcule a métrica de desempenho deste modelo final nos dados teste. -->
+
+<!-- Apresente, lado a lado, o gráfico de predito x observado para treino e para teste, mantenha os eixos x e y com mesmo range nos dois gráficos. Inclua uma reta coef=1 para auxiliar na avaliaçao-->
+
+Os coeficientes estimados do melhor modelo (`GLMnet`) utilizando os dados de trainamento encontram-se na Tabela \@ref(tab:coef-GLMnet). Todas as variáveis com coeficientes zerados (sobre o tamanho da cidade, se é costeira ou não, etc.) foram excluídas do modelo pela componente Lasso, e consideradas redundantes ou irrelevantes para a predição do `education_score`. Já em relação às outras, os coeficientes indicam relações positivas ou negativas com a variável resposta.
+
+Por exemplo, um aumento de um desvio padrão na variável `activity_at_age_19_full_time_higher_education`, relacionada à proporção de jovens de 19 anos em educação superior em tempo integral, está associado a um aumento de aproximadamente 2,7 unidades no `education_score`, mantendo todas as outras variáveis constantes. 
+
+Ser uma cidade com privação de renda mais baixa (`income_flag$Lower deprivation towns`), em comparação com cidades de privação de renda média (casela de referência), aumenta o `education_score` em 0,36 unidades, e ter privação de renda mais alta (`income_flag$Higher deprivation towns`) diminui a pontuação educacional em 0,21 unidades.
+
+Em relação a variável com fator negativo mais forte (`level4qual_residents35_64_2011$Low`), cidades na categoria de baixa proporção de adultos (35 a 64 anos) com qualificação de nível 4 ou superior, apresentam menos 0,22 unidades na pontuação educacional dos jovens em relação a cidades com alta proporção de adultos qualificados, mantendo todas as outras variáveis constantes. 
+
+```{r coef-GLMnet}
+
+knitr::kable(
+  tabela_coef,
+  caption = "Coeficientes estimados pelo Modelo GLMnet em ordem de importância (valor absoluto)",
+  format = "html",
+  align = "c"
+) %>%
+  kable_styling(font_size = 12,
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("hover", "responsive")) %>%
+  column_spec(1, width = "6cm") %>%  
+  column_spec(2, width = "4cm")    
+
+
+```
+
+```{r}
+set.seed(123)
+# O modelo escolhido é o GLMnet
+modelo_final <- modelo_glmnet
+
+# Fazer previsões no conjunto de teste
+predicoes_teste <- predict(modelo_final, newdata = teste)
+
+# Calcular as métricas de desempenho (RMSE, Rsquared e MAE)
+metricas_teste <- postResample(pred = predicoes_teste, obs = teste$education_score)
+
+# Fazer previsões no próprio conjunto de treino
+predicoes_treino <- predict(modelo_final, newdata = treino)
+
+# Calcular as métricas de desempenho no conjunto de treino
+metricas_treino <- postResample(pred = predicoes_treino, obs = treino$education_score)
+
+```
+
+```{r}
+# Criar a tabela de comparação
+tabela_comparacao <- data.frame(
+  Conjunto = c("Treino", "Teste"),
+  RMSE = c(metricas_treino["RMSE"], metricas_teste["RMSE"]),
+  Rsquared = c(metricas_treino["Rsquared"], metricas_teste["Rsquared"]),
+  MAE = c(metricas_treino["MAE"], metricas_teste["MAE"])
+)
+
+```
+
+Para avaliar o desempenho preditivo do modelo `GLMnet` e a capacidade de generalização, sua performance foi avaliada nos conjuntos de treinamento e teste. Dessa forma, foi possível observar na Tabela \@ref(tab:tab-comp), que o modelo apresenta ótimos resultados, e o melhor desempenho encontra-se no conjunto teste, que apresenta dados não utilizados na otimização, com RMSE e MAE ligeiramente menores, e $R^2$ maior.
+
+```{r tab-comp}
+
+knitr::kable(
+  tabela_comparacao,
+  caption = "Comparativo de Desempenho: Treino vs. Teste",
+  digits = 4,
+  format = "html",
+  align = "c") %>%
+  kable_styling(
+    font_size = 12,
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("hover", "responsive")
+    ) %>%
+  column_spec(1, width = "6cm") %>%  
+  column_spec(2, width = "4cm") %>%  
+  column_spec(3, width = "4cm") %>%  
+  column_spec(4, width = "4cm")      
+
+```
+
+
+```{r impor-var, fig.cap="Importância das variáveis no modelo GLMnet"}
+# Calcular e plotar a importância das variáveis
+importancia <- varImp(modelo_final, scale = TRUE)
+plot(importancia, top = 15)
+```
+O gráfico de importância das variáveis mostra a contribuição de cada preditor para o education_score no modelo GLMnet. A variável `activity_at_age_19_full_time_higher_education` se destaca como a mais influente, atingindo a pontuação máxima de 100, indicando que a proporção de jovens de 19 anos matriculados em ensino superior em tempo integral é o principal determinante do desempenho educacional de uma cidade.
+
+Em seguida, fatores socioeconômicos, representados por `income_flag`, exercem grande influência: cidades com menor privação de renda (“lower deprivation”) tendem a apresentar scores educacionais mais altos. A localização geográfica, especialmente a região Noroeste (`rgn11nm` = North West), aparece como o terceiro fator mais relevante, sugerindo disparidades regionais nos resultados.
+
+Outras variáveis, como a proporção de jovens de 19 anos empregados com rendimento maior que 10000 (`activity_at_age_19_employment_with_earnings_above_10_000`) e a proporção de residentes com 35-64 anos que possuem qualificação de Nível 4 ou superior (`level4qual_residents35_64_2011Low`), contribuem de forma menor, mas ainda relevante, para o modelo.
+
+Em resumo, o desempenho educacional é majoritariamente guiado pela taxa de participação no ensino superior, seguido por condições econômicas locais e fatores regionais.
+
+```{r desemp-treino,fig.cap="Desempenho do modelo GLMnet no Conjunto de Treino e Teste", fig.height=3,fig.width=8, fig.align='center'}
+
+# Criar dataframes para os plots
+df_treino <- data.frame(Observado = treino$education_score, Previsto = predicoes_treino)
+df_teste <- data.frame(Observado = teste$education_score, Previsto = predicoes_teste)
+
+# Determinar o range global para garantir que os eixos sejam idênticos
+range_global <- range(c(df_treino$Observado, df_treino$Previsto, df_teste$Observado, df_teste$Previsto), na.rm = TRUE)
+
+# Gráfico para o conjunto de treino
+plot_treino <- ggplot(df_treino, aes(x = Observado, y = Previsto)) +
+  geom_point(alpha = 0.5, color = "darkblue") +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed", size = 1) +
+  coord_fixed(ratio = 1, xlim = range_global, ylim = range_global) +
+  labs(
+       x = "Education Score Observado",
+       y = "Education Score Previsto") +
+  theme_minimal()
+
+# Gráfico para o conjunto de teste
+plot_teste <- ggplot(df_teste, aes(x = Observado, y = Previsto)) +
+  geom_point(alpha = 0.5, color = "darkgreen") +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed", size = 1) +
+  coord_fixed(ratio = 1, xlim = range_global, ylim = range_global) +
+  labs(
+       x = "Education Score Observado",
+       y = "Education Score Previsto") +
+  theme_minimal()
+
+# Apresentar os gráficos lado a lado
+grid.arrange(plot_treino, plot_teste, ncol = 2)
+
+```
+O gráfico à esquerda (pontos em azul) mostra o desempenho do modelo nos dados de treinamento. Os pontos estão bem próximos da linha, o que indica que o modelo conseguiu aprender bem os padrões desses dados. Já o gráfico à direita (pontos em verde), que representa o conjunto de teste, apresenta um resultado muito parecido, mostrando que o modelo consegue fazer boas previsões em dados novos, que não foram usados no treino. Essa consistência entre os dois conjuntos sugere que o modelo não sofre de sobreajuste (overfitting), ou seja, não se limitou a memorizar os exemplos de treino, mas aprendeu relações reais e replicáveis. Além disso, os pontos estão distribuídos de forma equilibrada ao redor da linha, o que mostra que o modelo não tem tendência a superestimar nem subestimar os valores do `education_score`.
+
+# Discussão
+
+<!-- Discuta os resultados do modelo tendo em vista os objetivos propostos. Relevancia/utilidade do modelo no contexto do problema -->
+
+Os resultados mostraram que os modelos de regressão linear e GLMnet foram os que melhor explicaram o education_score, o que indica que as relações entre as variáveis do estudo são basicamente lineares. Ou seja, quando uma variável aumenta ou diminui, o education_score tende a mudar de forma proporcional, sem precisar de modelos mais complexos para representar essas relações.
+
+O GLMnet teve um bom desempenho pois consegue lidar bem com variáveis que estão muito correlacionadas entre si, selecionando apenas as mais importantes para o modelo, o fato de ele e o modelo linear simples apresentarem resultados parecidos mostra que o comportamento dos dados é relativamente estável e previsível. Além disso, o melhor desempenho do GLMnet em relação a métodos mais complexos, como Boosting e Random Forest, sugere que a complexidade adicional desses algoritmos não se traduz em ganhos significativos para este conjunto de dados.
+
+No contexto do problema, o modelo é muito útil para entender quais fatores mais influenciam o desempenho educacional nas cidades do Reino Unido. As variáveis que mais se destacaram foram aquelas ligadas à continuidade dos estudos após o ensino médio, como a proporção de jovens de 19 anos no ensino superior, além de fatores socioeconômicos, como renda e emprego.
+
+De forma geral, o modelo ajuda a mostrar que o desempenho educacional não depende só da escola em si, mas também das condições sociais e econômicas de cada região. Assim, ele pode servir de apoio para a criação de políticas públicas que busquem melhorar o acesso à educação e reduzir desigualdades regionais.
+
+
+# Bibliografia
+
+<!-- não coloque nada aqui, será feito automaticamente se vc usar .bib e @ para citar referencias no texto, conforme ilustrado no template de exemplo-->

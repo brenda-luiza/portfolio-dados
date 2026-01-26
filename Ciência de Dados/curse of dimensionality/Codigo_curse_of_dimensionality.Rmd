@@ -1,0 +1,725 @@
+---
+title: "Atividade 02"
+output:
+  bookdown::html_document2:
+    number_sections: true
+    toc: true
+header-includes:
+   - \usepackage[brazil]{babel}
+---
+
+<!-- nao alterar o cabeçalho acima, nao incluir seu nome -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,   # não mostra códigos
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"  # centraliza todos os gráficos por padrão
+)
+```
+
+```{r loadpackages, echo=FALSE}
+# Função para instalar e carregar pacotes
+instalar_carregar <- function(pacotes) {
+  for (pkg in pacotes) {
+    if (!require(pkg, character.only = TRUE)) {
+      install.packages(pkg, dependencies = TRUE)
+      library(pkg, character.only = TRUE)
+    } else {
+      library(pkg, character.only = TRUE)
+    }
+  }
+}
+
+# Lista de pacotes que você precisa
+pacotes_necessarios <- c(
+  "tidyverse",
+  "purrr",
+  "scales",
+  "ggplot2",
+  "MASS",
+  "tibble",
+  "knitr",
+  "gridExtra",
+  "farver",
+  "kableExtra",
+  "caret",
+  "class"
+)
+
+# Executar a função
+instalar_carregar(pacotes_necessarios)
+
+```
+
+
+# Introdução {#sec-intro}
+
+O problema conhecido como *curse of dimensionality* (maldição da dimensionalidade) ocorre quando o número de dimensões de um conjunto de dados aumenta, tornando os pontos cada vez mais esparsos. Isso faz com que a noção de vizinhança perca sentido e prejudica algoritmos que dependem de medidas de distância, como o K-Nearest Neighbors. Para ilustrar esse efeito, foram realizadas simulações.
+
+
+Na Seção \@ref(sec-hiper), um hipercubo de volume unitário é construído com uma hiperesfera centralizada. À medida que a dimensão cresce, o volume da hiperesfera torna-se quase insignificante, mostrando como o espaço central se torna “vazio” em alta dimensão.
+
+Na Seção \@ref(sec-cluster) são criados dois clusters de dados, “A” e “B”, separados por uma distância em um espaço p-dimensional e na Seção \@ref(sec-projecao), é aplicada uma técnica de redução de dimensionalidade, projetando cada observação na linha que conecta os centróides dos clusters. 
+
+Por fim, na Seção \@ref(sec-knn), aplica-se o classificador $k$-NN para examinar como a combinação de alta dimensionalidade e diferentes tamanhos de cluster influencia a taxa de erro.
+
+
+<!-- Disserte sobre o problema de *curse of dimensionality* em aprendizado de máquina. Especificamente, sobre esparsidade dos dados em altas dimensões e o problema com métodos que utilizam medidas de distância. Explique o que o leitor encontrará nas seções seguintes (comente sobre a primeira simulaçao, com pontos distribuídos ao acaso e depois comente sobre a segunda simulação apresentada, que tem como objetivo ilustrar o problema enfrentado pelo método K-NN para classificação binária em altas dimensões) -->
+
+<!-- O seu texto deve motivar e explicar ao leitor sobre passos que estão sendo desenvolvidos, desta forma, muitas vezes a introdução é a última parte que escrevemos, pois deve motivar e dar um resumo rápido do que está por vir -->
+
+<!-- Utilize cross-reference para mencionar as seções no texto, por exemplo: -->
+<!-- Como discutido na Seção \@ref(sec-intro), ... -->
+
+
+
+# Simulando dados em hipercubos e hiperesferas {#sec-hiper}
+
+Podemos estudar o problema de *curse of dimensionality* considerando como exemplo dados distribuídos de maneira uniforme em um hipercubo de volume 1. 
+Considere uma hiperesfera de raio $r$ centralizada dentro do hipercubo. O volume da hiperesfera de dimensão $p$ e raio $r$ é dado por:
+
+$$V_p(r) = \frac{\pi^{p/2}}{\Gamma(p/2+1)}r^p $$
+
+De forma que, considerando raio $r$ ($r\leq 1/2$) e dimensão $p$, a proporção do volume da hiperesfera em relação ao do hipercubo de volume 1 é:
+
+$$R_{p, r} = \frac{V_p(r)}{1}$$
+
+```{r, echo=TRUE}
+calcula_razao <- function(r, p) {
+  
+  if (r > 1/2) {
+    print("Valor de raio inválido, precisa ser <= 1/2")
+  } 
+  else if (p <= 0 || p != as.integer(p)) {
+    print("Dimensão p inválida, precisa ser inteiro positivo")
+  } 
+  else {
+    
+    V_pr = (pi^(p/2) * r^p) / gamma(p/2 + 1)
+    
+    R_pr = V_pr
+
+    return(data.frame(r = r, p = p, Rpr = R_pr))
+  }
+}
+
+dimensoes <- 1:10
+
+
+# Iteramos sobre três valores de raio (0.5, 0.4 e 0.25) e, para cada um, sobre todas as dimensões, chamando nossa função e combinando os resultados.
+dados_plot <- map_dfr(c(0.5, 0.4, 0.25), function(raio) {
+  map_dfr(dimensoes, ~calcula_razao(r = raio, p = .x))
+})
+
+```
+
+
+```{r tabHipercubo}
+knitr::kable(dados_plot,
+             col.names = c("Raio (r)", "Dimensão (p)", "Proporção (R_pr)"),
+             caption = "Proporção do Volume da Hiperesfera em Relação ao Hipercubo",
+             format = "html",
+             align = "c"   # centraliza o conteúdo das colunas
+) %>%
+  kable_styling(full_width = FALSE,   # não ocupa a página inteira
+                position = "center",  # centraliza a tabela
+                bootstrap_options = c("hover", "responsive")) %>%
+  column_spec(1, width = "5cm") %>%    # primeira coluna menor
+  column_spec(2, width = "6cm") %>%    # segunda coluna média
+  column_spec(3, width = "8cm")        # terceira coluna maior
+
+```
+
+Como mostrado na Tabela \@ref(tab:tabHipercubo), observa-se que o volume relativo das hiperesferas decai rapidamente com a dimensão.
+
+```{r dimHipercubo,fig.cap="Proporção do Volume da Hiperesfera em Relaçãoo ao Hipercubo", fig.height=5,fig.width=7, fig.align = 'center'}
+
+
+
+ggplot(dados_plot, aes(x = p, y = Rpr, color = factor(r))) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5)  + labs(
+    x = "Dimensao (p)",
+    y = "Proporcao  (R_pr)",
+    color = "Raio (r)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14),
+    plot.subtitle = element_text(hjust = 0.5),
+    plot.caption = element_text(hjust = 0, face = "italic")
+  )
+
+```
+
+No Figura \@ref(fig:dimHipercubo) observa-se que, conforme a dimensão aumenta, a fração de volume da hiperesfera em relação ao hipercubo diminui rapidamente. Em dimensões menores que cinco (p < 5), as hiperesferas maiores possuem frações maiores do volume. Já em dimensões acima de nove (p ≈ 9), todas as curvas convergem rapidamente para zero, indicando que, independentemente do raio, a hiperesfera ocupa uma fração praticamente nula do volume do hipercubo em espaços de alta dimensão.
+
+# Simulando dois clusters {#sec-cluster}
+
+Visando criar um conjunto de dados com dois clusters (“A” e “B”) em um espaço de $p$ dimensões, define-se cada cluster em torno de um centróide, com as observações distribuídas segundo uma distribuição normal multivariada, permitindo modelar simultaneamente várias variáveis contínuas. 
+Para simplificar a interpretação dos dados, adota-se uma matriz de covariância identidade, garantindo que cada dimensão seja independente e sem correlação entre si. O cluster “B” é deslocado de forma a garantir que a distância entre os centróides seja aproximadamente $s$. 
+
+```{r, echo=TRUE}
+
+set.seed(12345)
+
+simula_clusters <- function(n, s, p) {
+  
+  # Validação dos parâmentos
+  if (n <= 0 || n %% 1 != 0) {
+    print("'n' deve ser inteiro positivo")
+  }
+  else if (s <= 0) {
+    print("'s' deve ser positivo")
+  }
+  else if (p <= 0 || p %% 1 != 0) {
+    print("'p' deve ser inteiro positivo")
+  }
+  else {
+  # Cluster A centrado na origem
+  mu_A <- rep(0, p)
+  # Cluster B deslocado em 's' na primeira dimensão
+  mu_B <- c(s, rep(0, p-1))
+  
+  # matriz Identidade p x p: variância 1, sem correlação entre variáveis
+  Sigma <- diag(p)
+  
+  #Cluster A e B
+  A <- mvrnorm(n, mu_A, Sigma)
+  B <- mvrnorm(n, mu_B, Sigma)
+  
+ #Tabela:
+  dados <- rbind(A, B) |> 
+    as.data.frame()
+  colnames(dados) <- paste0("X", 1:p)
+  
+  dados <- add_column(dados, cluster = rep(c("A","B"), each = n), .before = 1)
+  
+  return(dados)
+  }
+}
+
+
+dados_simulados <- simula_clusters(n = 100, s = 2, p = 5)
+
+```
+
+```{r dadosSimulados}
+knitr::kable(head(dados_simulados, 20),
+             caption = "Dados simulados com dois clusters ('A' e 'B') em 5 dimensões",
+             align = "c",
+             format = "html"
+)%>%
+  kable_styling(full_width = FALSE,   # não ocupa a página inteira
+                position = "center",  # centraliza a tabela
+                bootstrap_options = c("hover", "responsive")) %>%
+  column_spec(1, width = "3cm")   # primeira coluna menor
+
+```
+
+
+A Tabela \@ref(tab:dadosSimulados) apresenta uma amostra com as vinte primeiras linhas do conjunto de dados simulados pela função criada, contendo dois clusters, “A” e “B”, em um espaço de 5 dimensões.
+
+# Avaliando os dados simulados {#sec-projecao}
+
+<!-- Reduza os dados de dimensão p para a dimensão 1: projete cada observação (cada linha da sua matriz X) na direção que conecta os dois centróides https://allmodelsarewrong.github.io/pca.html#projections (para quem precisar revisar detalhes). Avalie se esses dados projetados na dimensão 1 apresentam diferença entre médias dos clusters aproximadamente igual a s-->
+
+Para avaliar os dados simulados, aplicamos uma função que reduz os dados de p dimensões para uma única dimensão, projetando cada observação na direção que conecta os centróides dos clusters “A” e “B”. Cada ponto recebe um valor $proj$ que indica sua posição ao longo dessa linha, permitindo avaliar a separação entre os clusters de forma clara. 
+
+O procedimento consiste em:
+
+(i) calcular os centróides de cada cluster;
+
+$$
+\mu_A = \frac{1}{n_A} \sum_{i \in A} x_i,
+\qquad
+\mu_B = \frac{1}{n_B} \sum_{i \in B} x_i
+$$
+
+
+(ii) definir a direção entre eles como um vetor unitário;
+
+O vetor direção entre os centróides é:
+
+$$
+d = \mu_B - \mu_A
+$$
+
+O vetor unitário correspondente é:
+
+$$
+u = \frac{d}{\|d\|}
+$$
+
+
+(iii) projetar cada observação subtraindo o centróide do cluster A e multiplicando pelo vetor unitário.
+
+$$
+proj(x_i) = (x_i - \mu_A) \cdot u
+$$
+
+```{r, echo=TRUE}
+projecao <- function(dados) {
+  
+  # matriz de preditores
+  X <- dados %>% dplyr::select(-cluster)
+  
+  # CÁLCULO DOS CENTRÓIDES
+  centroid_A <- dados %>% filter(cluster == "A") %>% dplyr::select(-cluster) %>% colMeans()
+  
+  centroid_B <- dados %>% filter(cluster == "B") %>% dplyr::select(-cluster) %>% colMeans()
+  
+  # O vetor de direção
+  v <- centroid_B - centroid_A
+  
+  #vetor unitário 'u'.
+  u <- v / sqrt(sum(v^2))
+  
+  # PROJEÇÃO DOS DADOS
+  proj_valores <- as.matrix(X) %>%
+    sweep(., 2, centroid_A, "-") %*% u
+  
+  resultado_proj <- tibble(
+    proj = as.vector(proj_valores),
+    cluster = dados$cluster
+  )
+  
+  return(resultado_proj)
+}
+
+
+dados_projetados <- projecao(dados_simulados)
+
+# Validação
+medias_proj <- dados_projetados %>%
+  group_by(cluster) %>%
+  summarise(media = mean(proj))
+
+# Calcula a diferença entre as médias, que deve ser aproximadamente 's'
+diferenca_medias <- medias_proj$media[2] - medias_proj$media[1]
+
+```
+
+```{r, tabProjecao}
+# Visualizando o resultado da projeção
+
+knitr::kable(head(dados_projetados, 20),
+             col.names = c("Projetado", "Cluster"),
+             caption = "Resultado da projeção dos clusters",
+             align = "c",
+             format = "html"
+)%>%
+  kable_styling(full_width = FALSE,   # não ocupa a página inteira
+                position = "center",  # centraliza a tabela
+                bootstrap_options = c("hover", "responsive")) %>%
+  column_spec(1, width = "5cm") %>%
+  column_spec(2, width = "5cm")
+
+```
+
+
+A Tabela \@ref(tab:tabProjecao) apresenta as primeiras 20 observações após a aplicação da função de projeção aos dados simulados.
+
+Os valores calculados confirmam que a projeção preservou a separação entre os clusters. A distância $s$ foi definida como dois na simulação, e a diferença observada entre as médias dos valores projetados foi de aproximadamente 1,89.
+
+Para facilitar a compreensão, foi ilustrado um exemplo simples com 30 observações, em duas dimensões, e distância entre os centróides igual a dois, que pode ser visto na imagem abaixo.
+
+```{r}
+
+# Simula dados em 2D
+set.seed(123)
+dados_sim <- simula_clusters(n = 30, s = 2, p = 2)
+dados_proj <- projecao(dados_sim)
+
+# Calcula centróides
+centroids <- dados_sim %>%
+  group_by(cluster) %>%
+  summarise(across(starts_with("X"), mean))
+
+# Vetor unitário de projeção
+X_mat <- as.matrix(dados_sim[, 2:3])
+cent_A <- as.numeric(centroids[1, 2:3])
+u <- as.numeric(centroids[2, 2:3] - centroids[1, 2:3])
+u <- u / sqrt(sum(u^2))
+
+# Coordenadas projetadas na linha
+proj_val <- (X_mat - cent_A) %*% u
+proj_points <- data.frame(
+  x_orig = X_mat[,1],
+  y_orig = X_mat[,2],
+  x_proj = cent_A[1] + proj_val * u[1],
+  y_proj = cent_A[2] + proj_val * u[2],
+  cluster = dados_sim$cluster
+)
+
+```
+
+
+```{r projecao2d, cap= "Clusters 2D e projeção na linha entre centróides", fig.height=5,fig.width=7, fig.align = 'center'}
+
+# --- Gráfico 2D com setas de projeção ---
+g1 <- ggplot() +
+  geom_point(data = dados_sim, aes(x = X1, y = X2, color = cluster), size = 3) +
+  geom_point(data = centroids, aes(x = X1, y = X2), shape = 8, size = 4, color = "black") +
+  geom_segment(data = proj_points,
+               aes(x = x_orig, y = y_orig, xend = x_proj, yend = y_proj, color = cluster),
+               linetype = "dotted") +
+  geom_point(data = proj_points, aes(x = x_proj, y = y_proj, color = cluster), size = 3, shape = 16) +
+  geom_segment(aes(x = centroids$X1[1], y = centroids$X2[1],
+                   xend = centroids$X1[2], yend = centroids$X2[2]),
+               color = "gray40", linetype = "dashed", size = 1) +
+  labs(title = "Clusters 2D e Projeção na Linha entre Centróides",
+       x = "X1", y = "X2") +
+  theme_minimal(base_size = 14)
+
+
+```
+
+```{r projecao1d, fig.cap= "Projeção dos clusters na direção entre centróides", fig.height=5,fig.width=7, fig.align = 'center'}
+# --- Gráfico 1D da projeção ---
+g2 <- ggplot(dados_proj, aes(x = proj, y = cluster, color = cluster)) +
+  geom_point(position = position_jitter(height = 0.1), size = 3) +
+  labs(title = "Projeção dos clusters na direção entre centróides",
+       x = "Valor Projetado (proj)",
+       y = "Cluster") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+```
+
+```{r projecao, fig.cap= "Redução de Dimensionalidade", fig.height=5,fig.width=7, fig.align = 'center'}
+
+# --- Combina os gráficos ---
+grid.arrange(g1, g2, ncol = 1, heights = c(2, 1))
+
+
+```
+
+
+A Figura \@ref(fig:projecao) ilustra o processo de redução de dimensionalidade. Observa-se no primeiro gráfico os dados originais em duas dimensões, com dois clusters distintos, e a linha tracejada mostrando a direção da projeção entre os centróides. Cada ponto “cai” nessa linha, preservando a relação de distância entre os grupos. 
+
+No gráfico seguinte, os dados projetados aparecem em uma única dimensão, mantendo a separação entre os clusters de forma evidente, sem perder a característica que distingue os grupos.
+
+# Calculando as distâncias {#sec-dist}
+
+
+## Distância euclideana entre os centróides
+<!-- Escreva uma pequena função para calcular a distância euclideana entre os centróides dos dois clusters gerados -->
+
+```{r, echo=TRUE}
+
+dist_centroides <- function(dados) {
+  
+  # 1. Calcular os centróides dos clusters "A" e "B"
+  centroid_A <- dados %>% filter(cluster == "A") %>% dplyr::select(-cluster) %>% colMeans()
+  centroid_B <- dados %>% filter(cluster == "B") %>% dplyr::select(-cluster) %>% colMeans()
+  
+  # 2. Calcular a distância euclidiana entre os centróides
+  distancia <- sqrt(sum((centroid_A - centroid_B)^2))
+  
+  # 3. Retornar o valor da distância
+  return(distancia)
+}
+distancia_centroides <- dist_centroides(dados_simulados)
+
+```
+A função `dist_centroides` tem como objetivo calcular a distância euclidiana entre os centróides dos clusters “A” e “B”. Primeiramente, são extraídas as observações de cada grupo e, em seguida, calculadas as médias de cada variável, obtendo-se assim os vetores que representam os centróides. A partir desses vetores, aplica-se a fórmula da distância euclidiana em dimensão $p$:
+
+$$ d(A,B) = \sqrt{ \sum_{j=1}^{p} \left( centroid_A^{(j)} - centroid_B^{(j)} \right)^2 } $$
+
+No caso dos dados simulados, o resultado obtido de aproximadamente $1,89$ está bem próximo da distância definida na simulação ($s = 2$), e a pequena diferença é explicada pelo caráter aleatório da geração dos dados. Portanto, o cálculo confirma que os clusters foram gerados de forma bem separada no espaço multidimensional.
+
+## Distância em pares
+
+<!-- Escreva uma função para calcular as distâncias em pares.  -->
+
+```{r, echo=TRUE}
+
+dist_pares <- function(dados) {
+  
+  # 1. Separar os dados em clusters A e B
+  dados_A <- dados %>% filter(cluster == "A") %>% dplyr::select(-cluster) 
+  dados_B <- dados %>% filter(cluster == "B") %>% dplyr::select(-cluster)
+
+  # 2. Criar uma função para calcular a distância euclidiana entre dois pontos
+  calc_distancia <- function(ponto1, ponto2) {
+    sqrt(sum((ponto1 - ponto2)^2))
+  }
+  
+  # 3. Inicializar uma lista para armazenar os resultados
+  resultados <- list()
+  
+  # 4. Calcular distâncias para pares dentro de A
+  for(i in 1:(nrow(dados_A) - 1)) {
+    for(j in (i + 1):nrow(dados_A)) {
+      dist <- calc_distancia(as.numeric(dados_A[i, ]), as.numeric(dados_A[j, ]))
+      resultados <- append(resultados, list(data.frame(distancia = dist, tipo = "Dentro de A")))
+    }
+  }
+  
+  # 5. Calcular distâncias para pares dentro de B
+  for(i in 1:(nrow(dados_B) - 1)) {
+    for(j in (i + 1):nrow(dados_B)) {
+      dist <- calc_distancia(as.numeric(dados_B[i, ]), as.numeric(dados_B[j, ]))
+      resultados <- append(resultados, list(data.frame(distancia = dist, tipo = "Dentro de B")))
+    }
+  }
+  
+  # 6. Calcular distâncias para pares entre A e B
+  for(i in 1:nrow(dados_A)) {
+    for(j in 1:nrow(dados_B)) {
+      dist <- calc_distancia(as.numeric(dados_A[i, ]), as.numeric(dados_B[j, ]))
+      resultados <- append(resultados, list(data.frame(distancia = dist, tipo = "Entre")))
+    }
+  }
+  
+  # 7. Combinar todos os resultados em um único data.frame
+  resultado_final <- bind_rows(resultados)
+  
+  return(resultado_final)
+}
+# Usando a função com os dados simulados
+resultados_distancias <- dist_pares(dados_simulados)
+
+```
+
+A função `dist_pares` tem como objetivo calcular as distâncias euclidianas entre todos os pares de pontos do conjunto de dados, separando esses cálculos em três categorias: distâncias entre pontos pertencentes apenas ao cluster A, distâncias entre pontos pertencentes apenas ao cluster B e distâncias entre pontos pertencentes a clusters diferentes (um no A e outro no B). Para isso, a função primeiro separa os dados em dois subconjuntos, um para o cluster A e outro para o cluster B. Em seguida, é calculada a distância euclidiana entre dois pontos genéricos \(x_i\) e \(x_j\), em um espaço de dimensão \(p\), dada por:  
+
+$$ d(x_i, x_j) = \sqrt{ \sum_{k=1}^{p} \left( x_i^{(k)} - x_j^{(k)} \right)^2 } $$
+
+
+Depois disso, são criados laços de repetição que percorrem os pares possíveis de observações dentro do cluster A, dentro do cluster B e entre os clusters A e B. Em geral, espera-se que as distâncias **dentro de A** e **dentro de B** sejam menores (indicando que os pontos de cada cluster estão próximos entre si), enquanto as distâncias **entre A e B** tendem a ser maiores (mostrando que os grupos estão separados no espaço). 
+
+Para confirmar isso, calculamos a média das distâncias euclidianas (Tabela \@ref(tab:mediaDist)), observamos que os valores **dentro de A** e **dentro de B** são relativamente próximos e baixos, indicando que os pontos de cada cluster estão concentrados e próximos entre si. Já a média das distâncias **entre A e B** é consideravelmente maior, o que mostra que os dois clusters estão bem separados.  
+
+
+
+```{r mediaDist}
+
+medias_distancias <- resultados_distancias %>% group_by(tipo) %>% summarise(media = mean(distancia), .groups = "drop")
+
+medias_distancias %>%
+  knitr::kable(
+    col.names = c("Tipo", "Média das Distâncias"),
+    caption = "Média das Distâncias por Tipo",
+    format = "html",
+    align = "c"
+  ) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("hover", "responsive")
+  ) %>%
+  column_spec(1, width = "6cm") %>%
+  column_spec(2, width = "6cm")
+```
+
+
+Esse resultado reforça a ideia de que os clusters possuem baixas distâncias dentro dos grupos altas distâncias entre grupos, o que é desejável em análises de agrupamento.
+
+
+
+# Usando k-NN para classificação {#sec-knn}
+
+<!-- Escreva uma função que, para valores de p, n e s gera dados usando a função simula_clusters e avalia o desempenho de k-NN. Observe que, para usar o k-NN, deve-se escolher o número de vizinhos (k) o que é um tuning parameter que deve ser escolhido com validaçao cruzada. Desta forma, você deverá usar validaçao cruzada para encontrar o k, treinar o k-NN nos dados de treinamento e calcular uma medida de desempenho no teste. -->
+
+Para avaliar o desempenho do classificador $k-NN$, foram utilizados os dados simulados criados anteriormente. Os dados foram divididos em conjuntos de treino e teste, e o melhor valor de $k$ do $k-NN$, foi determinado por meio de uma validação cruzada de 10 folds no conjunto de treino. No conjunto de teste, a taxa de erro foi calculada como a proporção de observações classificadas incorretamente.
+
+```{r avalia-knn, echo=TRUE}
+
+set.seed(42) 
+avalia_knn <- function(n,s,p){
+  
+  #usando simula_clusters para gerar dados
+  dados = simula_clusters(n=n, s=s, p=p)
+  dados$cluster = as.factor(dados$cluster)
+  
+  #separando em treino (70%) e teste (30%)
+  set.seed(42)
+  indices_treino = sample(1:nrow(dados), size = 0.7*nrow(dados))
+  dados_treino = dados[indices_treino,]
+  dados_teste = dados[-indices_treino,]
+  
+  #validação cruzada para encontrar o melhor k (10-fold Cross Validation)
+  metodo = trainControl(method = "cv", number = 10)
+  grid_k = expand.grid(k = seq(from = 1, to = 19, by=2)) #testando valores impares
+  set.seed(42)
+  knn_cv = train(cluster~.,data = dados_treino, method = "knn",
+                 trControl = metodo, tuneGrid = grid_k)
+  
+  melhor_k = knn_cv$bestTune$k
+  
+  treino_x = dados_treino[,-1]
+  treino_y = dados_treino[,1]
+  teste_x = dados_teste[,-1]
+  teste_y = dados_teste[,1]
+  
+  #previsao no conjunto teste com o melhor k
+  previsoes = knn(train = treino_x, test = teste_x, cl = treino_y, k = melhor_k)
+  
+  taxa_erro = mean(previsoes != teste_y)
+  
+  resultado = data.frame(erro = taxa_erro, p = p, n = n)
+  
+  return(resultado)
+}
+
+resultado_exemplo = avalia_knn(n = 100, s = 2, p = 5)
+
+resultado_exemplo %>% 
+  kable(caption = "Resultado do desempenho de k-NN para classificação",
+        align = "l")
+```
+O resultado obtido apresentou uma taxa de erro de aproximadamente 15%, indicando que a maior parte das observações foi corretamente atribuída ao seu cluster de origem. Esse desempenho sugere que os clusters estão bem separados, embora pequenas regiões de sobreposição entre eles tenham gerado alguns erros de classificação.
+
+# Resultados {#sec-res}
+
+
+<!-- Apresente e discuta os resultados simulados para diversos valore de p. -->
+
+Os experimentos realizados na Seção \@ref(sec-hiper) mostram os efeitos da dimensionalidade nos dados e nos métodos de análise. Observou-se que o volume da hiperesfera, na Figura \@ref(fig:dimHipercubo) e na Tabela \@ref(tab:tabHipercubo),  diminui rapidamente em relação ao hipercubo à medida que a dimensão $p$ aumenta, evidenciando que o espaço se torna cada vez mais “vazio” em altas dimensões — um fenômeno da *curse of dimensionality*.
+
+<!-- Para cada valor de p, apresente (explique para o leitor a utilidade dessas figuras, o objetivo delas): -->
+
+
+<!-- * Gráfico de densidade representando a distribuicão das distancias em pares. Separe, com cores ou texturas diferentes, uma curva de densidade para cada tipo ("Dentro de A", "Dentro de B", "Entre")  -->
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(purrr)
+
+# Gerar distâncias para diferentes valores de p
+gera_distancias_multiplas_dim <- function(n = 100, s = 2, p_vals = c(5,10,25,50,100)) {
+  resultados <- map_dfr(p_vals, function(p) {
+    dados <- simula_clusters(n = n, s = s, p = p)
+    distancias <- dist_pares(dados)
+    distancias$p <- p  # adiciona a dimensão p como coluna
+    return(distancias)
+  })
+  return(resultados)
+}
+
+# Gerar resultados para p = 2, 5 e 10
+distancias_multi <- gera_distancias_multiplas_dim(p_vals = c(5,10,25,50,100))
+
+
+```
+
+```{r distanciasMulti, fig.cap= "Distribuicao das Distancias em Pares para Diferentes Dimensoes p", fig.height=5,fig.width=7, fig.align = 'center'}
+
+
+# Plotar em facetas
+ggplot(distancias_multi, aes(x = distancia, fill = tipo, color = tipo)) +
+  geom_density(alpha = 0.3, adjust = 1.2) +
+  facet_wrap(~p, scales = "free") +
+  labs(title = "Distribuicao das Distancias em Pares para Diferentes Dimensoes p",
+       x = "Distancia Euclidiana",
+       y = "Densidade") +
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_text(hjust = 0.5, size = 14))
+
+
+
+```
+
+
+O gráfico \@ref(fig:distanciasMulti) mostra como as distâncias entre pontos dentro e entre clusters se comportam à medida que a dimensão $p$ aumenta de 5 a 100, ilustrando a *curse of dimensionality*. Em dimensões baixas, as distâncias intra-cluster são menores e bem separadas das inter-cluster, mas à medida que $p$ cresce, todas as distâncias aumentam e as curvas se sobrepõem cada vez mais. Em dimensões altas, as distribuições ficam praticamente iguais, tornando impossível distinguir pontos de clusters diferentes.
+
+<!-- * Gráfico de densidade dos valores projetados na direção conectando os centróides. Separe, com cores ou texturas diferentes, uma curva de densidade para cada cluster.  -->
+
+```{r}
+# Gráfico de densidade dos valores projetados
+gera_projecoes_multiplas_dim <- function(n = 100, s = 2, p_vals = c(5,10,25,50,100)) {
+  resultados <- map_dfr(p_vals, function(p) {
+    dados <- simula_clusters(n = n, s = s, p = p)
+    proj <- projecao(dados)  # gera os valores projetados
+    proj$p <- p                     # adiciona a dimensão como coluna
+    return(proj)
+  })
+  return(resultados)
+}
+
+dados_projetados_multi <- gera_projecoes_multiplas_dim(p_vals = c(5,10,25,50,100))
+
+
+library(ggplot2)
+
+```
+
+```{r dadosProjetadosMulti, fig.cap= "Distribuicao dos Valores Projetados na Direcao Entre Centroides", fig.height=5,fig.width=7, fig.align = 'center'}
+
+ggplot(dados_projetados_multi, aes(x = proj, fill = cluster, color = cluster)) +
+  geom_density(alpha = 0.5, adjust = 1.2) +
+  facet_wrap(~p, scales = "free") +
+  labs(title = "Distribuicao dos Valores Projetados na Direcao Entre Centroides",
+       x = "Valor Projetado",
+       y = "Densidade",
+       fill = "Cluster",
+       color = "Cluster") +
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_text(hjust = 0.5, size = 14))
+
+```
+
+
+A Figura \@ref(fig:dadosProjetadosMulti) mostra a distribuição de dois clusters projetados na linha que conecta seus centroides para dimensões 
+$p = 5,10,25,50,100$. Em baixa dimensão ($p = 5$), os clusters estão bem separados, com pequena sobreposição, facilitando a classificação. À medida que $p$ aumenta, as distribuições se tornam mais largas e a sobreposição cresce, tornando a separação mais difícil. Em dimensões altas, as curvas se espalham significativamente, e os clusters se misturam, mesmo que os centroides permaneçam distintos.
+
+<!-- Apresente os resultados do desempenho do k-NN através de uma figura com gráfico(s) para valores diversos de n e p. -->
+
+```{r desempenho-knn, fig.cap= "Desempenho do k-NN pela dimensão e número de observações"}
+valores_n = c(50,100,200,500,1000)
+valores_p = c(2,5,10,25,50,100)
+s_fixo = 2
+
+lista_resultados = list()
+
+#loop para testar em todos os valores de n e p
+
+for (n_atual in valores_n) {
+  for (p_atual in valores_p) {
+    
+    resultado_rodada = avalia_knn(n = n_atual, s = s_fixo, p = p_atual)
+    
+    lista_resultados[[length(lista_resultados)+1]] = resultado_rodada
+  }
+}
+
+resultados_finais = bind_rows(lista_resultados)
+
+
+  
+```
+
+```{r resultadosFinais, fig.cap= "Taxa de erro de classificacao", fig.height=5,fig.width=7, fig.align = 'center'}
+
+ggplot(resultados_finais,
+       aes(x = p, y = erro, color = as.factor(n), group = n)) +
+  geom_line(linewidth = 1) +  
+  geom_point(size = 3) +     
+  # Formatando o eixo Y para mostrar porcentagens
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(x = "Numero de dimensoes (p)",
+    y = "Taxa de erro de classificacao (no teste)",
+    color = "Observacoes por Cluster (n)") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+
+Por fim, o gráfico \@ref(fig:resultadosFinais) mostra que a taxa de erro de classificação aumenta com a dimensionalidade, evidenciando a maldição da dimensionalidade, especialmente para clusters pequenos ($n=50$). Clusters maiores apresentam erro menor e crescimento mais gradual, indicando que mais dados ajudam a compensar o efeito das dimensões altas. Em dimensões intermediárias (20–50) há um ponto de transição: o erro se estabiliza para clusters grandes, mas continua elevado para clusters pequenos, destacando a importância do tamanho do cluster em espaços de alta dimensão. 
+
+# Discussão
+
+<!-- Discuta, por exemplo, como o aumento de dimensão do problema afeta as distâncias em pares. Por que projetar na direção da diferença entre os centróides é interessante? Discuta sobre a relação entre n e p no desempenho do k-NN -->
+
+
+Os resultados obtidos confirmam os efeitos da maldição da dimensionalidade. À medida que a dimensão $p$ aumenta, as distâncias absolutas entre pares de pontos tendem a crescer. Em altas dimensões, a variabilidade relativa entre as distâncias diminui, fazendo com que todos os pontos estejam aproximadamente à mesma distância uns dos outros.
+
+A projeção dos dados na direção que conecta os centróides dos clusters mostrou-se uma estratégia útil para evidenciar a diferença entre eles. Essa estratégia pode ser justificada pelo fato de que essa direção concentra a maior variação entre os grupos, maximizando a separação das médias. Assim, ainda que a alta dimensionalidade dificulte a visualização e a classificação, a projeção preserva a informação mais relevante para distinguir os clusters, facilitando a análise e reduzindo parcialmente os efeitos da dimensionalidade.
+
+Outro fator relevante é a relação entre o número de observações $n$ por cluster e a dimensão do espaço $p$. Quando $n$ é reduzido, o aumento de $p$ realça a esparsidade do espaço, resultando em maior sobreposição entre as distribuições e, consequentemente, no aumento da taxa de erro do $k$-NN. No entanto, para valores mais elevados de $n$, há mais pontos disponíveis próximos ao ponto a ser classificado, o que ajuda a manter o desempenho do $k$-NN por mais tempo antes que a maldição da dimensionalidade finalmete prevaleça, e contribui para reduzir os erros de classificação em dimensões intermediárias. Contudo, mesmo em cenários com grandes amostras, o aumento excessivo de $p$ inevitavelmente compromete a performance do método, dado que a maldição da dimensionalidade não pode ser completamente eliminada.
+
+
+
