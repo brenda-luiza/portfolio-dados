@@ -9,7 +9,7 @@ Neste portfólio, você encontrará projetos acadêmicos e pessoais que refletem
 
 ## 🎯 Objetivo
 
-Atuar como **Analista de Dados Júnior**, aplicando conhecimentos em Estatística e Ciência de Dados para gerar insights e apoiar decisões estratégicas.
+Atuar com dados, aplicando conhecimentos em Estatística e Ciência de Dados para gerar insights e apoiar decisões estratégicas.
 
 ---
 
@@ -56,7 +56,7 @@ Atuar como **Analista de Dados Júnior**, aplicando conhecimentos em Estatístic
 
 - **Linguagens:** R, Python, SQL  
 - **BI & Visualização:** Tableau  
-- **Ferramentas:** Git, GitHub, AWS, GCP  
+- **Ferramentas:** Git, GitHub, AWS
 - **Pacote Office:** Excel, Word, PowerPoint  
 - **Soft skills:** Boa comunicação, trabalho em equipe, organização e dinamismo
 
