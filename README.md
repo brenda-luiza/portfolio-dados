@@ -42,7 +42,16 @@ Atuar com dados, aplicando conhecimentos em Estatística e Ciência de Dados par
 **Itaú Unibanco** — São Paulo, SP  
 📅 Abril/2025 – Presente  
 **Ferramentas:** SQL | AWS | ETL | Git | GitHub
+**Atividades:**
+- Comunicações Automatizadas - Incubadora CRM: Desenvolvimento das camadas de variáveis estruturadas na Salesforce, utilizando SQL e AWS Glue, para habilitar automaticamente os públicos-alvo que podem ser selecionados na configuração das réguas automatizadas de comunicação.
 
+- Devin: Criação de PlayBooks e Prompts para automatizar a geração de artefatos no Shawarma, otimizando processos e aumentando a eficiência.
+
+- Produtização de Bases: Desenvolvimento de pipelines ETL/ELT para ingestão, transformação e integração de dados, utilizando Python, SQL, Apache Spark, Terraform e serviços AWS como Athena, Glue, S3, IAM, Lambda, Step Functions e EventBridge.
+
+- Versionamento e Colaboração: Utilização de Git/GitHub para garantir a qualidade, rastreabilidade e colaboração eficiente no desenvolvimento dos dados.
+
+- Documentação: Elaboração e manutenção da documentação dos produtos da equipe no GitHub Pages, assegurando fácil acesso e atualização contínua.
 ---
 
 ### 🛒 Estagiária de Data Analytics  
